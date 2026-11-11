@@ -23,12 +23,12 @@ F=~/.config/fs-reimburse/auth.json
 
 ## 1. 登录（每台电脑一次，token 过期时重来）
 
-**先试环境变量自动登录。** 如果用户在智能体的环境变量里配置了 `FSR_EMAIL` 和 `FSR_PASSWORD`，直接原样执行下面这段，不需要用户操作。命令只从环境变量读取，不要把密码的值写进命令、打印出来或复述给用户：
+**先试环境变量自动登录。** 如果用户在智能体的环境变量里配置了 `yx`（邮箱）和 `mm`（密码）（旧写法 `FSR_EMAIL`、`FSR_PASSWORD` 也支持），直接原样执行下面这段，不需要用户操作。命令只从环境变量读取，不要把密码的值写进命令、打印出来或复述给用户：
 
 ```sh
-if [ -n "$FSR_EMAIL" ] && [ -n "$FSR_PASSWORD" ]; then
+if [ -n "${yx:-$FSR_EMAIL}" ] && [ -n "${mm:-$FSR_PASSWORD}" ]; then
   mkdir -p ~/.config/fs-reimburse && chmod 700 ~/.config/fs-reimburse
-  R=$(jq -n '{identity:env.FSR_EMAIL,password:env.FSR_PASSWORD}' \
+  R=$(jq -n '{identity:(env.yx // env.FSR_EMAIL),password:(env.mm // env.FSR_PASSWORD)}' \
    | curl -s -X POST http://10.1.2.247/api/collections/users/auth-with-password -H 'Content-Type: application/json' -d @-)
   if echo "$R" | jq -e '.token' >/dev/null 2>&1; then
     echo "$R" | jq '{url:"http://10.1.2.247",token:.token,user:{id:.record.id,email:.record.email,name:.record.name}}' > ~/.config/fs-reimburse/auth.json

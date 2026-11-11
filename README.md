@@ -16,7 +16,7 @@ https://github.com/mozm-ctrl/fs-reimburse-skill/tree/main/fs-reimburse
 
 **登录（二选一）**：
 
-- **环境变量（推荐，不用碰终端）**：在 Multica 的智能体设置 → 环境变量里添加 `FSR_EMAIL`（报销网站邮箱）和 `FSR_PASSWORD`（密码），保存即可。智能体会自动登录。
+- **环境变量（推荐，不用碰终端）**：在 Multica 的智能体设置 → 环境变量里添加 `yx`（报销网站邮箱）和 `mm`（密码），保存即可。智能体会自动登录。
 - **终端**：第一次报销时，智能体会给你一段登录命令，在自己的终端里运行一次即可。密码不会经过智能体，也不会被保存；登录 token 只存在本机 `~/.config/fs-reimburse/auth.json`。
 
 前提：macOS，电脑能访问公司内网。
