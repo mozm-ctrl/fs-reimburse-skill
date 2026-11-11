@@ -23,7 +23,26 @@ F=~/.config/fs-reimburse/auth.json
 
 ## 1. 登录（每台电脑一次，token 过期时重来）
 
-**密码绝对不能经过你（智能体）。** 不要在对话里问密码，也不要把密码写进命令。请用户在**自己的终端**里粘贴运行下面这段（Claude Code 里可以在开头加 `! ` 直接运行）：
+**先试环境变量自动登录。** 如果用户在智能体的环境变量里配置了 `FSR_EMAIL` 和 `FSR_PASSWORD`，直接原样执行下面这段，不需要用户操作。命令只从环境变量读取，不要把密码的值写进命令、打印出来或复述给用户：
+
+```sh
+if [ -n "$FSR_EMAIL" ] && [ -n "$FSR_PASSWORD" ]; then
+  mkdir -p ~/.config/fs-reimburse && chmod 700 ~/.config/fs-reimburse
+  R=$(jq -n '{identity:env.FSR_EMAIL,password:env.FSR_PASSWORD}' \
+   | curl -s -X POST http://10.1.2.247/api/collections/users/auth-with-password -H 'Content-Type: application/json' -d @-)
+  if echo "$R" | jq -e '.token' >/dev/null 2>&1; then
+    echo "$R" | jq '{url:"http://10.1.2.247",token:.token,user:{id:.record.id,email:.record.email,name:.record.name}}' > ~/.config/fs-reimburse/auth.json
+    chmod 600 ~/.config/fs-reimburse/auth.json; echo "已登录 $(jq -r .user.email ~/.config/fs-reimburse/auth.json)"
+  else echo "ENV_LOGIN_FAILED"; fi
+  unset R
+else echo "NO_ENV"; fi
+```
+
+- `已登录 …`：继续第 2 步。
+- `ENV_LOGIN_FAILED`：告诉用户环境变量里的邮箱或密码不对（或者连不上公司内网），请他在智能体设置的“环境变量”里改正。
+- `NO_ENV`：没有配置环境变量，改用下面的终端登录。
+
+**终端登录。** 密码绝对不能经过你（智能体）。不要在对话里问密码，也不要把密码写进命令。请用户在**自己的终端**里粘贴运行下面这段（Claude Code 里可以在开头加 `! ` 直接运行）：
 
 ```sh
 mkdir -p ~/.config/fs-reimburse && chmod 700 ~/.config/fs-reimburse
@@ -57,7 +76,7 @@ CODE=$(echo "$R" | tail -1); BODY=$(echo "$R" | sed '$d')
 if [ "$CODE" = 200 ]; then echo "$BODY" | jq --arg u "$(jq -r .url $F)" '{url:$u,token:.token,user:{id:.record.id,email:.record.email,name:.record.name}}' > $F.tmp && mv $F.tmp $F && chmod 600 $F && echo "OK $(jq -r .user.email $F)"; else echo "REFRESH_FAILED $CODE"; fi
 ```
 
-- `REFRESH_FAILED 401`/`403`/`404`：登录已过期，回到第 1 步。
+- `REFRESH_FAILED 401`/`403`/`404`：登录已过期，回到第 1 步（配置了环境变量时会自动重新登录，用户无需操作）。
 - `REFRESH_FAILED 000`：连不上网站，请用户连公司内网或 VPN。
 
 然后告诉用户：“将以 <邮箱> 提交 <N> 张凭证：<餐饮/采购（用途）>，日期 <今天>。确认提交吗？”用户明确同意后才继续。用户在同一句话里已经说了“直接提交”的，可以跳过确认。
@@ -114,7 +133,7 @@ curl -s -G "$(jq -r .url $F)/api/collections/records/records" -H "Authorization:
 
 | 情况 | 怎么处理 |
 | --- | --- |
-| 还没登录 / 刷新返回 401、403、404 | 请用户在自己的终端运行第 1 步 |
+| 还没登录 / 刷新返回 401、403、404 | 按第 1 步：先试环境变量自动登录，没有再请用户在终端登录 |
 | 返回码 000、连接超时 | 请用户连公司内网或 VPN 后重试 |
 | 提交失败 400（比如当天还没有饭否/采购打卡） | 把网站的原话转告用户。网站要求当天先打卡，请用户先去网站打卡，再让你重试 |
 | 图片无法读取 | 请用户换一张，或者导出为 JPEG/PNG |
