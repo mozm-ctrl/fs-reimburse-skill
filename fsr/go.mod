@@ -5,7 +5,6 @@ go 1.26.0
 require (
 	github.com/gen2brain/heic v0.7.2
 	golang.org/x/image v0.48.0
-	golang.org/x/term v0.48.0
 )
 
 require (

@@ -37,9 +37,6 @@ type Record struct {
 	Memo                string  `json:"memo"`
 }
 
-// errExpired means the site rejected the stored token; the user has to log in again.
-var errExpired = fmt.Errorf("登录已过期，请在自己的终端重新运行：fsr login")
-
 func postJSON(base, path, token string, body any) (*http.Response, error) {
 	var r io.Reader
 	if body != nil {
@@ -91,24 +88,7 @@ func Login(base, email, password string) (*Auth, error) {
 	}
 	defer res.Body.Close()
 	if res.StatusCode == 400 {
-		return nil, fmt.Errorf("登录失败：网站拒绝了邮箱 %s 和这个密码", email)
-	}
-	if res.StatusCode != 200 {
-		return nil, apiError(res)
-	}
-	var a Auth
-	return &a, json.NewDecoder(res.Body).Decode(&a)
-}
-
-// Refresh extends the token's lifetime and returns the new token.
-func Refresh(base, token string) (*Auth, error) {
-	res, err := postJSON(base, "/api/collections/users/auth-refresh", token, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer res.Body.Close()
-	if res.StatusCode == 401 || res.StatusCode == 403 || res.StatusCode == 404 {
-		return nil, errExpired
+		return nil, fmt.Errorf("登录失败：网站拒绝了邮箱 %s 和这个密码，请检查环境变量 FSR_EMAIL / FSR_PASSWORD", email)
 	}
 	if res.StatusCode != 200 {
 		return nil, apiError(res)

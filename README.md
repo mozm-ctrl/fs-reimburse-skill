@@ -2,7 +2,7 @@
 
 让 AI 智能体（Claude Code、Multica 等）把小票提交到公司报销网站（nodelink-intranet，`http://10.1.2.247`）。
 
-skill 通过一个单文件命令行程序 `fsr` 完成所有操作：登录、图片压缩（含 iPhone 的 HEIC）、提交和查询。macOS、Linux、Windows（PowerShell、cmd、Git Bash）都能用，**除了 `fsr` 本身，不需要安装任何东西**（不需要 `jq`、`sips`、Go 或 Python）。
+skill 通过一个单文件命令行程序 `fsr` 完成所有操作：登录、图片压缩（含 iPhone 的 HEIC）、提交和查询。macOS、Linux、Windows（PowerShell、cmd、Git Bash）都能用。**需要安装的只有 `fsr` 这一个文件**（不需要 `jq`、`sips`、Go 或 Python），而且智能体第一次用时发现没装会自己装。
 
 前提：电脑能访问公司内网（在外面请先连 VPN）。
 
@@ -42,20 +42,41 @@ https://github.com/mozm-ctrl/fs-reimburse-skill/tree/main/fs-reimburse
 
 **Claude Code**：把 `fs-reimburse` 文件夹复制到 `~/.claude/skills/`（Windows 是 `%USERPROFILE%\.claude\skills\`）。
 
-## 3. 登录（二选一）
+## 3. 设置账号（环境变量）
 
-不需要提前登录，智能体在需要时会处理。
+`fsr` 每次运行都用两个环境变量直接登录报销网站，不需要在终端里输入密码，也不会在本机保存 token 或任何登录文件：
 
-- **环境变量（推荐，不用碰终端）**：在 Multica 的智能体设置 → 环境变量里添加 `yx`（报销网站邮箱）和 `mm`（密码）。`fsr` 每次运行都会用它们重新登录，不在本机保存任何登录文件。旧写法 `FSR_EMAIL`、`FSR_PASSWORD` 也支持。
-- **终端**：没有配置环境变量时，智能体会请你在自己的终端里运行一次：
+| 变量 | 内容 |
+| --- | --- |
+| `FSR_EMAIL` | 报销网站邮箱 |
+| `FSR_PASSWORD` | 报销网站密码 |
 
-  | 环境 | 命令 |
-  | --- | --- |
-  | macOS / Linux 终端、PowerShell、cmd | `fsr login` |
-  | Claude Code 对话框 | `! fsr login` |
-  | Windows Git Bash | `winpty fsr login`（Git Bash 不能隐藏密码输入，需要加 `winpty`；或者改在 PowerShell 里运行） |
+（之前用过的 `yx` / `mm` 也仍然支持；两组都设置时以 `FSR_EMAIL` / `FSR_PASSWORD` 为准。）
 
-  按提示输入邮箱和密码。密码不会经过智能体，也不会被保存；只在本机保存登录 token（`~/.config/fs-reimburse/auth.json`，Windows 是 `%USERPROFILE%\.config\fs-reimburse\auth.json`），过期后智能体会请你重新登录。退出登录：`fsr logout`。
+没设置时，`fsr` 会报“没有设置报销网站账号”，智能体会告诉你要设置哪两个变量，然后停下。智能体不会在对话里问你的密码；密码也不会出现在命令行参数、输出或日志里（`fsr` 在程序内部读取环境变量）。
+
+**在智能体运行环境里配置（推荐）**：
+
+- **Multica**：智能体设置 → 环境变量，添加 `FSR_EMAIL` 和 `FSR_PASSWORD`，保存即可，下一次运行生效。
+- **Claude Code** 等直接在本机终端里启动的智能体：按下面各系统的方法设置，然后重新打开终端、重新启动智能体。
+
+**macOS / Linux**：把下面两行加到 shell 配置文件（macOS 默认是 `~/.zshrc`，Linux 一般是 `~/.bashrc`），然后重新打开终端：
+
+```sh
+export FSR_EMAIL="zhangsan@nodelink.it"
+export FSR_PASSWORD="你的密码"
+```
+
+建议执行 `chmod 600 ~/.zshrc`（或 `~/.bashrc`），只让自己能读。
+
+**Windows（PowerShell、cmd、Git Bash 通用）**：设置为用户环境变量。在 PowerShell 里运行下面的命令，它会提示你输入密码，输入时不显示，也不会留在命令历史里：
+
+```powershell
+[Environment]::SetEnvironmentVariable("FSR_EMAIL", "zhangsan@nodelink.it", "User")
+[Environment]::SetEnvironmentVariable("FSR_PASSWORD", [Net.NetworkCredential]::new("", (Read-Host "报销网站密码" -AsSecureString)).Password, "User")
+```
+
+也可以用图形界面：开始菜单搜索“编辑账户的环境变量”，在“用户变量”里新建这两个变量。设置后重新打开终端（包括 Git Bash）和智能体才会生效。
 
 ## 使用
 
@@ -70,7 +91,7 @@ https://github.com/mozm-ctrl/fs-reimburse-skill/tree/main/fs-reimburse
 也可以自己直接用（所有系统命令相同）：
 
 ```sh
-fsr whoami                                              # 当前登录的账号
+fsr whoami                                              # 检查账号能否登录
 fsr upload --dry-run receipt.heic                       # 只检查，不提交
 fsr upload receipt.jpg                                  # 餐饮，日期为今天
 fsr upload --type purchase --memo "办公用品" a.jpg b.png  # 采购，最多 5 张
@@ -88,9 +109,8 @@ fsr records -n 10                                       # 最近的记录
 
 | 环境变量 | 说明 |
 | --- | --- |
-| `yx` / `mm` | 报销网站邮箱 / 密码，设置后每次运行自动登录 |
+| `FSR_EMAIL` / `FSR_PASSWORD` | 报销网站邮箱 / 密码，必填（也可以用 `yx` / `mm`） |
 | `INTRANET_URL` | 报销网站地址，默认 `http://10.1.2.247` |
-| `FSR_CONFIG` | 终端登录时 token 文件的路径 |
 
 ## 开发
 

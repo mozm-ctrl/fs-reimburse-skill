@@ -27,14 +27,17 @@ func TestEnvCredentials(t *testing.T) {
 	if _, _, ok := envCredentials(); ok {
 		t.Fatal("expected no credentials")
 	}
-	t.Setenv("FSR_EMAIL", "a@x")
-	t.Setenv("FSR_PASSWORD", "p")
-	if e, _, ok := envCredentials(); !ok || e != "a@x" {
-		t.Fatalf("legacy names: got %q %v", e, ok)
+	if _, _, err := session(); err != errNoEnv {
+		t.Fatalf("session without env: got %v, want errNoEnv", err)
 	}
-	t.Setenv("yx", "b@x")
-	t.Setenv("mm", "q")
+	t.Setenv("yx", "a@x")
+	t.Setenv("mm", "p")
+	if e, _, ok := envCredentials(); !ok || e != "a@x" {
+		t.Fatalf("yx/mm: got %q %v", e, ok)
+	}
+	t.Setenv("FSR_EMAIL", "b@x")
+	t.Setenv("FSR_PASSWORD", "q")
 	if e, p, ok := envCredentials(); !ok || e != "b@x" || p != "q" {
-		t.Fatalf("yx/mm should win: got %q %q %v", e, p, ok)
+		t.Fatalf("FSR_* should win: got %q %q %v", e, p, ok)
 	}
 }
