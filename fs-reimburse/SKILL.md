@@ -25,70 +25,17 @@ description: Submit reimbursement receipts (meal or purchase) to the company rei
 
 ## 1. 确定参数
 
-- **类型**：默认餐饮 `MEAL`。只有用户明确说采购、买东西、办公用品等，才用 `SHOPPING_RECEIPT`，并带上用途（memo）。用户说采购但没说用途时，问一句；用户不想写也可以不带。餐饮不带用途。
-- **日期**：固定为今天，由命令自动生成。如果用户说的是以前的小票，提醒他记录日期会是今天。
-- **图片**：本地图片路径。一条记录 1–5 张；超过 5 张时，先问用户是拆成多条，还是只挑 5 张。一张图里有几张小票、或者多张图属于同一笔报销，都放在同一条记录里。
+- **类型**：用户说报销、餐饮、吃饭等用 `MEAL`；说采购、买东西、办公用品等用 `SHOPPING_RECEIPT`。用户没说类型时默认餐饮 `MEAL`。
+- **用途**：只有采购才带用途（memo）。用户说了用途就带上；没说就不带，**不要追问**。餐饮不带用途。
+- **日期**：固定为今天，由命令自动生成。如果用户说的是以前的小票，提交后提醒一句记录日期是今天。
+- **图片**：本地图片路径。一条记录 1–5 张；超过 5 张时，按顺序每 5 张拆成一条，分别提交。一张图里有几张小票、或者多张图属于同一笔报销，都放在同一条记录里。
   - 只支持 `.jpg` / `.jpeg` / `.png` / `.webp` / `.gif`。图片会原样上传，不做压缩。
   - iPhone 的 `.heic` 网站显示不了：请用户发截图，或者导出为 JPEG 再给你。
   - 单张超过 3 MB 时，建议用户改发截图或小一点的图片，太大可能被网站拒绝或打开很慢。
 
-## 2. 预检（必须）
+## 2. 直接提交（不需要用户确认）
 
-预检会登录，并检查图片在不在、有多大，**不会提交**。
-
-**sh 版**：
-
-```sh
-U=${INTRANET_URL:-http://10.1.2.247}
-j() { printf '%s' "$1" | tr '\n\r\t' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
-v() { printf '%s' "$R" | sed -n 's/.*"'"$1"'" *: *"\([^"]*\)".*/\1/p'; }
-fsr_login() {
-  E=${FSR_EMAIL:-$yx}
-  if [ -z "$E" ] || [ -z "${FSR_PASSWORD:-$mm}" ]; then echo "NO_ENV"; return 1; fi
-  R=$(printf '{"identity":"%s","password":"%s"}' "$(j "$E")" "$(j "${FSR_PASSWORD:-$mm}")" \
-    | curl -s -m 20 -X POST "$U/api/collections/users/auth-with-password" -H 'Content-Type: application/json' --data-binary @-)
-  if [ -z "$R" ]; then echo "CONNECT_FAILED $U"; return 1; fi
-  TOKEN=$(v token)
-  if [ -z "$TOKEN" ]; then echo "LOGIN_FAILED $(v message)"; return 1; fi
-  ME_ID=$(v id); ME_EMAIL=$(v email); ME_NAME=$(v name)
-}
-if fsr_login; then
-  for f in "<图片1>" "<图片2>"; do
-    if [ -f "$f" ]; then echo "FILE $(wc -c < "$f" | tr -d ' ') bytes: $f"; else echo "MISSING $f"; fi
-  done
-  echo "OK $ME_EMAIL $(date +%F)"
-fi
-```
-
-**PowerShell 版**：
-
-```powershell
-$U = if ($env:INTRANET_URL) { $env:INTRANET_URL } else { "http://10.1.2.247" }
-$E = if ($env:FSR_EMAIL) { $env:FSR_EMAIL } else { $env:yx }
-$A = $null
-if (-not $E -or -not ($env:FSR_PASSWORD -or $env:mm)) { "NO_ENV" } else {
-  $Login = @{ identity = $E; password = $(if ($env:FSR_PASSWORD) { $env:FSR_PASSWORD } else { $env:mm }) } | ConvertTo-Json -Compress
-  try { $A = Invoke-RestMethod -Method Post -Uri "$U/api/collections/users/auth-with-password" -ContentType "application/json; charset=utf-8" -Body ([Text.Encoding]::UTF8.GetBytes($Login)) -TimeoutSec 20 }
-  catch { if ($_.Exception.Response) { "LOGIN_FAILED " + $_.ErrorDetails.Message } else { "CONNECT_FAILED " + $_.Exception.Message } }
-  Remove-Variable Login
-}
-if ($A) {
-  foreach ($f in @("<图片1>", "<图片2>")) {
-    if (Test-Path -LiteralPath $f -PathType Leaf) { "FILE $((Get-Item -LiteralPath $f).Length) bytes: $f" } else { "MISSING $f" }
-  }
-  "OK $($A.record.email) $(Get-Date -Format yyyy-MM-dd)"
-}
-```
-
-- 输出 `OK <邮箱> <日期>`：预检通过。
-- 有 `MISSING`：图片路径不对，请用户重新提供。
-- `NO_ENV` / `LOGIN_FAILED` / `CONNECT_FAILED`：按上面“安全规则”处理，然后停下。
-
-## 3. 请用户确认（必须）
-
-告诉用户：“将以 <邮箱> 提交 <N> 张凭证：<餐饮/采购（用途）>，日期 <今天>。确认提交吗？”用户明确同意后才继续。用户在同一句话里已经说了“直接提交，不用确认”的，可以跳过确认，但预检仍然要做。
-
-## 4. 提交
+用户发了图片、说了是餐饮（报销）还是采购，就**直接执行下面的提交命令**，不要先预检，也不要再问“确认提交吗”。命令本身会登录、检查图片，有问题会报错而不会提交。
 
 把 `TYPE`、`MEMO` 和图片路径换成实际值；餐饮时 `MEMO` 留空。
 
@@ -179,14 +126,15 @@ if ($A) {
 ```
 
 - `CREATED id=…`：成功。把**记录 ID**、类型和日期告诉用户。
+- `NO_ENV` / `LOGIN_FAILED` / `CONNECT_FAILED`：按上面“安全规则”处理，然后停下。
 - `BAD_IMAGE …`：列出的图片不存在或格式不支持，按第 1 步处理。
 - `FAILED <状态码> …`：见下面的“出错时”。
 
-同一组图片只提交一次。如果不确定上次有没有成功，请用户先到网站上看一下，不要直接重复提交。
+同一组图片只提交一次：同一个对话里已经提交成功的图片，不要再提交；命令中途失败、不确定有没有成功时，不要自动重试，请用户先到网站上看一下。
 
-## 5. 查询最近记录
+## 3. 查询最近记录
 
-**sh 版**（前面的 `U=`、`j()`、`v()`、`fsr_login()` 这几行和第 2 步完全一样，原样复制）：
+**sh 版**（前面的 `U=`、`j()`、`v()`、`fsr_login()` 这几行和第 2 步一样）：
 
 ```sh
 U=${INTRANET_URL:-http://10.1.2.247}
@@ -209,7 +157,7 @@ if fsr_login; then
 fi
 ```
 
-**PowerShell 版**（前面的登录部分和第 2 步完全一样）：
+**PowerShell 版**（前面的登录部分和第 2 步一样）：
 
 ```powershell
 $U = if ($env:INTRANET_URL) { $env:INTRANET_URL } else { "http://10.1.2.247" }
@@ -241,5 +189,5 @@ if ($A) {
 | `FAILED 400`（比如当天还没有饭否/采购打卡） | 把网站的原话转告用户。网站要求当天先打卡，请用户先去网站打卡，再让你重试 |
 | `FAILED 400` 且提到 `receiptUrl` 或长度 | 图片太大，请用户改发截图或更小的图片 |
 | `FAILED 401` / `403` | 登录状态被网站拒绝，重新执行一次；还不行就请用户在网站上确认账号正常 |
-| `BAD_IMAGE`、`MISSING` | 请用户换一张，或者导出为 JPEG/PNG |
+| `BAD_IMAGE` | 请用户换一张，或者导出为 JPEG/PNG |
 | 找不到 `curl`（极少见） | Windows 请改用 PowerShell 版；Linux 请用户装 curl |
