@@ -1,144 +1,95 @@
 ---
 name: fs-reimburse
-description: Submit reimbursement receipts (meal or purchase) to the company reimbursement site nodelink-intranet (10.1.2.247) using only built-in macOS tools (curl, sips, base64, jq) — nothing to install. Use when the user asks to upload, submit or file a receipt / 小票 / 发票 / 报销凭证, says things like "帮我把这张小票按餐饮报销上传" or "采购报销", or asks about their recent reimbursement records.
+description: Submit reimbursement receipts (meal or purchase) to the company reimbursement site nodelink-intranet (10.1.2.247) with the single-file `fsr` CLI, which works the same on macOS, Linux and Windows (PowerShell, cmd, Git Bash) and needs no other tools. Use when the user asks to upload, submit or file a receipt / 小票 / 发票 / 报销凭证, says things like "帮我把这张小票按餐饮报销上传" or "采购报销", or asks about their recent reimbursement records.
 ---
 
 # 报销上传（fs-reimburse）
 
-把小票图片提交到公司报销网站（nodelink-intranet，PocketBase 后端），生成一条“待审核”记录。金额由管理员审核时填写。
+用 `fsr` 命令把小票图片提交到公司报销网站（nodelink-intranet，`http://10.1.2.247`，需要公司内网或 VPN），生成一条“待审核”记录。金额由管理员审核时填写，不需要你填。
 
-全程只用 macOS 自带的 `curl`、`sips`、`base64`、`jq`，**不需要安装任何程序**。下面的命令请原样执行，只替换尖括号里的内容。
+`fsr` 是一个单文件程序，macOS、Linux、Windows 上的命令完全一样（PowerShell、cmd、Git Bash 里都直接写 `fsr ...`）。图片压缩、HEIC 转换、登录都在 `fsr` 内部完成，不需要 `sips`、`jq`、`base64` 等工具。
 
-- 网站地址：`http://10.1.2.247`（需要公司内网或 VPN）
-- 登录信息保存在：`~/.config/fs-reimburse/auth.json`（权限 600，只保存 token，不保存密码）
+## 1. 确认装了 fsr
 
-## 0. 检查登录
+运行 `fsr version`。找不到命令时，直接替用户安装（不需要密码，也不需要管理员权限）：
 
-```sh
-F=~/.config/fs-reimburse/auth.json
-[ -f "$F" ] && jq -r '.user.email' "$F" || echo NOT_LOGGED_IN
-```
+- macOS / Linux / Git Bash：
+  ```sh
+  curl -fsSL https://raw.githubusercontent.com/mozm-ctrl/fs-reimburse-skill/main/install.sh | sh
+  ```
+- Windows PowerShell：
+  ```powershell
+  irm https://raw.githubusercontent.com/mozm-ctrl/fs-reimburse-skill/main/install.ps1 | iex
+  ```
 
-输出 `NOT_LOGGED_IN` 时，按第 1 步登录；否则记下邮箱，直接进入第 2 步。
-
-## 1. 登录（每台电脑一次，token 过期时重来）
-
-**先试环境变量自动登录。** 如果用户在智能体的环境变量里配置了 `yx`（邮箱）和 `mm`（密码）（旧写法 `FSR_EMAIL`、`FSR_PASSWORD` 也支持），直接原样执行下面这段，不需要用户操作。命令只从环境变量读取，不要把密码的值写进命令、打印出来或复述给用户：
-
-```sh
-if [ -n "${yx:-$FSR_EMAIL}" ] && [ -n "${mm:-$FSR_PASSWORD}" ]; then
-  mkdir -p ~/.config/fs-reimburse && chmod 700 ~/.config/fs-reimburse
-  R=$(jq -n '{identity:(env.yx // env.FSR_EMAIL),password:(env.mm // env.FSR_PASSWORD)}' \
-   | curl -s -X POST http://10.1.2.247/api/collections/users/auth-with-password -H 'Content-Type: application/json' -d @-)
-  if echo "$R" | jq -e '.token' >/dev/null 2>&1; then
-    echo "$R" | jq '{url:"http://10.1.2.247",token:.token,user:{id:.record.id,email:.record.email,name:.record.name}}' > ~/.config/fs-reimburse/auth.json
-    chmod 600 ~/.config/fs-reimburse/auth.json; echo "已登录 $(jq -r .user.email ~/.config/fs-reimburse/auth.json)"
-  else echo "ENV_LOGIN_FAILED"; fi
-  unset R
-else echo "NO_ENV"; fi
-```
-
-- `已登录 …`：继续第 2 步。
-- `ENV_LOGIN_FAILED`：告诉用户环境变量里的邮箱或密码不对（或者连不上公司内网），请他在智能体设置的“环境变量”里改正。
-- `NO_ENV`：没有配置环境变量，改用下面的终端登录。
-
-**终端登录。** 密码绝对不能经过你（智能体）。不要在对话里问密码，也不要把密码写进命令。请用户在**自己的终端**里粘贴运行下面这段（Claude Code 里可以在开头加 `! ` 直接运行）：
-
-```sh
-mkdir -p ~/.config/fs-reimburse && chmod 700 ~/.config/fs-reimburse
-printf "报销网站邮箱: "; read -r E; printf "密码（不显示，不保存）: "; stty -echo 2>/dev/null; read -r P; stty echo 2>/dev/null; echo
-R=$(jq -n --arg i "$E" --arg p "$P" '{identity:$i,password:$p}' \
- | curl -s -X POST http://10.1.2.247/api/collections/users/auth-with-password -H 'Content-Type: application/json' -d @-)
-unset P
-if echo "$R" | jq -e '.token' >/dev/null 2>&1; then
-  echo "$R" | jq '{url:"http://10.1.2.247",token:.token,user:{id:.record.id,email:.record.email,name:.record.name}}' > ~/.config/fs-reimburse/auth.json
-  chmod 600 ~/.config/fs-reimburse/auth.json; echo "已登录 $(jq -r .user.email ~/.config/fs-reimburse/auth.json)"
-else echo "登录失败：邮箱或密码不对，或者连不上公司内网"; fi
-unset R
-```
-
-用户回复登录成功后，再执行第 0 步确认一下。
+装好后如果当前终端还找不到 `fsr`，用安装脚本最后打印的完整路径运行（macOS / Linux 是 `~/.local/bin/fsr`，Windows 是 `%LOCALAPPDATA%\fsr\fsr.exe`）。
 
 ## 2. 确定参数
 
-- **类型**：默认餐饮 `MEAL`。只有用户明确说采购、买东西、办公用品等，才用 `SHOPPING_RECEIPT`，并带上用途（memo）。用户说采购但没说用途时，问一句；用户不想写也可以不带。餐饮不带用途。
-- **日期**：固定为今天（`date +%F`）。如果用户说的是以前的小票，提醒他记录日期会是今天。
-- **图片**：本地图片路径。一条记录放 1–5 张；超过 5 张时，先问用户是拆成多条，还是只挑 5 张。`sips` 能读取 JPEG/PNG/HEIC/GIF/TIFF/BMP 等格式，HEIC 也可以直接用。
+- **类型**：默认是餐饮（`--type meal`）。只有用户明确说是采购、买东西、办公用品等，才用采购（`--type purchase`），并带上用途 `--memo "<用途>"`。用户说采购但没说用途时，问一句用途；用户不想写也可以不带。餐饮不带用途。
+- **日期**：自动取今天，不能改。如果用户说的是以前的小票，提醒他记录日期会是今天。
+- **图片**：用户给的本地图片路径。一条记录 1–5 张；超过 5 张时，先问用户是拆成多条，还是只挑 5 张。支持 JPEG / PNG / HEIC / GIF / WebP / BMP / TIFF，iPhone 的 HEIC 可以直接用。一张图里有几张小票、或者多张图属于同一笔报销，都放在同一条记录里。
 
-## 3. 提交前确认（必须）
+## 3. 预检，并请用户确认（必须）
 
-先刷新 token，确认登录还有效（同时也会延长 token 的有效期）：
-
-```sh
-F=~/.config/fs-reimburse/auth.json
-R=$(curl -s -w '\n%{http_code}' -X POST "$(jq -r .url $F)/api/collections/users/auth-refresh" -H "Authorization: $(jq -r .token $F)")
-CODE=$(echo "$R" | tail -1); BODY=$(echo "$R" | sed '$d')
-if [ "$CODE" = 200 ]; then echo "$BODY" | jq --arg u "$(jq -r .url $F)" '{url:$u,token:.token,user:{id:.record.id,email:.record.email,name:.record.name}}' > $F.tmp && mv $F.tmp $F && chmod 600 $F && echo "OK $(jq -r .user.email $F)"; else echo "REFRESH_FAILED $CODE"; fi
-```
-
-- `REFRESH_FAILED 401`/`403`/`404`：登录已过期，回到第 1 步（配置了环境变量时会自动重新登录，用户无需操作）。
-- `REFRESH_FAILED 000`：连不上网站，请用户连公司内网或 VPN。
-
-然后告诉用户：“将以 <邮箱> 提交 <N> 张凭证：<餐饮/采购（用途）>，日期 <今天>。确认提交吗？”用户明确同意后才继续。用户在同一句话里已经说了“直接提交”的，可以跳过确认。
-
-## 4. 提交
-
-把图片压缩成网站前端的格式（最宽 800px、JPEG 质量 60），再提交。把 `TYPE`、`MEMO` 和图片路径换成实际值；餐饮时 `MEMO` 留空：
+不用事先检查登录状态，直接预检。预检会登录、检查图片，但不会提交：
 
 ```sh
-F=~/.config/fs-reimburse/auth.json
-TYPE=MEAL            # 或 SHOPPING_RECEIPT
-MEMO=""              # 采购用途，餐饮留空
-T=$(mktemp -d); i=0; OK=1
-for IMG in "<图片1>" "<图片2>"; do
-  i=$((i+1))
-  W=$(sips -g pixelWidth "$IMG" 2>/dev/null | awk '/pixelWidth/{print $2}')
-  case "$W" in ''|*[!0-9]*) echo "图片无法读取: $IMG"; OK=0; break;; esac
-  if [ "$W" -gt 800 ]; then
-    sips -s format jpeg -s formatOptions 60 --resampleWidth 800 "$IMG" --out "$T/$i.jpg" >/dev/null 2>&1
-  else
-    sips -s format jpeg -s formatOptions 60 "$IMG" --out "$T/$i.jpg" >/dev/null 2>&1
-  fi
-  [ -s "$T/$i.jpg" ] || { echo "图片转换失败: $IMG"; OK=0; break; }
-  { printf 'data:image/jpeg;base64,'; base64 -i "$T/$i.jpg" | tr -d '\n'; } > "$T/$i.txt"
-done
-if [ $OK = 1 ]; then
-  jq -n --arg uid "$(jq -r .user.id $F)" --arg em "$(jq -r .user.email $F)" --arg nm "$(jq -r .user.name $F)" \
-    --arg date "$(date +%F)" --arg type "$TYPE" --arg memo "$MEMO" \
-    --slurpfile urls <(for f in "$T"/*.txt; do jq -Rs . "$f"; done) \
-    '{userId:$uid,userEmail:$em,userName:$nm,date:$date,type:$type,status:"pending",reimbursementAmount:0,receiptUrl:($urls|tojson)}
-     + (if $type=="SHOPPING_RECEIPT" and $memo!="" then {memo:$memo} else {} end)' > "$T/body.json"
-  CODE=$(curl -s -o "$T/res.json" -w '%{http_code}' -X POST "$(jq -r .url $F)/api/collections/records/records" \
-    -H 'Content-Type: application/json' -H "Authorization: $(jq -r .token $F)" -d @"$T/body.json")
-  if [ "$CODE" = 200 ]; then jq '{id,date,type,status,memo}' "$T/res.json"
-  else echo "提交失败 $CODE: $(jq -r '.message + " " + (.data|tostring)' "$T/res.json" 2>/dev/null || cat "$T/res.json")"; fi
-fi
-rm -rf "$T"
+fsr upload --dry-run --type <meal|purchase> [--memo "<用途>"] <图片...>
 ```
 
-成功时会输出记录的 `id`、`date`、`type`、`status`。把**记录 ID**、类型和日期告诉用户。
+- 成功时输出类似 `[dry-run] 将以 zhangsan@nodelink.it 提交 1 张凭证（餐饮，2026-11-12），未实际提交`。
+- 报“还没有登录”或“登录已过期”：按第 4 步登录，然后重新预检。
 
-同一组图片只提交一次。如果不确定上次有没有成功，先按第 5 步查一下，不要直接重复提交。
+预检成功后告诉用户：“将以 <邮箱> 提交 <N> 张凭证：<餐饮/采购（用途）>，日期 <今天>。确认提交吗？”用户明确同意后才继续。用户在同一句话里已经说了“直接提交，不用确认”的，可以跳过确认，但预检仍然要做。
 
-## 5. 查询最近记录
+## 4. 登录（需要时才做）
+
+`fsr` 按下面的顺序登录，你不需要读任何本地文件：
+
+1. **环境变量**：如果智能体的环境变量里有 `yx`（邮箱）和 `mm`（密码）（旧写法 `FSR_EMAIL`、`FSR_PASSWORD` 也支持），`fsr` 每次运行都会直接用它们登录，用户不需要做任何事。不要打印、复述或在命令里写出这些值。登录失败时，请用户到智能体设置的“环境变量”里改正邮箱或密码。
+2. **用户自己在终端登录**：没有配置环境变量时，请用户在**自己的终端**里运行：
+   ```sh
+   fsr login
+   ```
+   Claude Code 里可以输入 `! fsr login`。Windows 的 Git Bash 里要用 `winpty fsr login`（或者改在 PowerShell 里运行 `fsr login`）。
+
+   **密码绝对不能经过你。** 不要在对话里问密码，不要替用户输入密码，也不要把密码写进任何命令。用户说登录好了，再重新运行第 3 步的预检。
+
+## 5. 提交
 
 ```sh
-F=~/.config/fs-reimburse/auth.json
-curl -s -G "$(jq -r .url $F)/api/collections/records/records" -H "Authorization: $(jq -r .token $F)" \
-  --data-urlencode "filter=userId=\"$(jq -r .user.id $F)\"" --data-urlencode "sort=-created" --data-urlencode "perPage=10" \
-  | jq -r '.items[] | [.date,.type,.status,.reimbursementAmount,.id,(.memo//"")] | @tsv'
+fsr upload --json --type meal <图片...>
+fsr upload --json --type purchase --memo "办公用品" <图片...>
 ```
+
+成功时输出 JSON，包含 `id`（记录 ID）、`date`、`type`、`status`。把记录 ID、类型和日期告诉用户。
+
+同一组图片只提交一次。如果不确定上次有没有成功，先问用户去网站上看一下，不要直接重复提交。
+
+## 6. 查询最近记录
+
+```sh
+fsr records -n 10          # 每行：日期、类型、状态、金额、记录 ID、用途
+fsr records -n 10 --json
+```
+
+注意：报销网站对普通员工账号可能不返回记录（包括待审核的），这时结果是空的。**结果为空不代表没有提交过**，不要据此判断“没有重复”，也不要据此重新提交；请用户以网站页面为准。
 
 ## 出错时
 
-| 情况 | 怎么处理 |
+| 错误信息 | 怎么处理 |
 | --- | --- |
-| 还没登录 / 刷新返回 401、403、404 | 按第 1 步：先试环境变量自动登录，没有再请用户在终端登录 |
-| 返回码 000、连接超时 | 请用户连公司内网或 VPN 后重试 |
-| 提交失败 400（比如当天还没有饭否/采购打卡） | 把网站的原话转告用户。网站要求当天先打卡，请用户先去网站打卡，再让你重试 |
-| 图片无法读取 | 请用户换一张，或者导出为 JPEG/PNG |
+| 找不到 `fsr` 命令 | 按第 1 步安装 |
+| 还没有登录 / 登录已过期 | 按第 4 步登录，完成后重试 |
+| 用环境变量 yx/mm 登录失败 | 请用户在智能体设置的“环境变量”里改正邮箱或密码 |
+| 登录失败：网站拒绝了邮箱…和这个密码 | 请用户检查邮箱和密码，重新运行 `fsr login` |
+| 这个终端无法隐藏密码输入 | Git Bash 里请用户改用 `winpty fsr login`，或者在 PowerShell 里运行 `fsr login` |
+| 连不上报销网站 | 请用户连上公司内网或 VPN 后重试 |
+| 报销网站返回 400 …（比如当天还没有饭否/采购打卡） | 把网站原话转告用户。网站要求当天先打卡，请用户先去网站打卡，再让你重试 |
+| 无法识别的图片格式 | 请用户换一张，或者导出为 JPEG/PNG |
+| 一条记录需要 1-5 张图片 | 按第 2 步拆分 |
 
 规则：
-- 不要打印 token。
-- 不要修改 `auth.json` 里的内容（第 1 步和第 3 步按上面的命令写入的除外）。
-- 用户要退出登录时，执行 `rm ~/.config/fs-reimburse/auth.json`。
+- 不要打印 token 或密码。
+- 不要自己读写或删除 `fsr` 的登录文件。用户要退出登录时，运行 `fsr logout`。
